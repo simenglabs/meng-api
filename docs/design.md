@@ -23,8 +23,9 @@ struct User ->
     email: str;
 <-;
 
-set app: App = NewApp(title: "Users API", version: "1.0.0");
-set users: Group = NewGroup(app, "/users", tag: "users");
+% Globals are set up at startup, before annotations run, and are frozen afterwards. %
+global app: App = NewApp(title: "Users API", version: "1.0.0");
+global users: Group = NewGroup(app, "/users", tag: "users");
 
 % A handler gets the request and returns a response or an error.
   Path parameters, query strings, and JSON bodies are read through helpers.
@@ -51,13 +52,13 @@ fnc CreateUser(req: Request): Response, error ->
 <-;
 
 @hook.startup(app)
-fnc Startup(app: App): error ->
+fnc Startup(keep a: App): error ->
     show("connecting to the database");
     return none;
 <-;
 
 @hook.shutdown(app)
-fnc Shutdown(app: App) ->
+fnc Shutdown(keep a: App) ->
     show("bye");
 <-;
 
@@ -84,11 +85,13 @@ if err != none ->
 
 1. **Function references** (`fnc(Request): Response, error` as a parameter type, so
    handlers and hooks can be registered). Plain function pointers: no closures.
+   **Done in the compiler (plan 4).**
 2. **Dotted function names and annotations.** A package may declare `fnc route.get(...)`
    (a dotted name, callable as `route.get(...)`). An annotation `@route.get(users, "/{id}")`
    on the line above `fnc GetUser` means: call `route.get(users, "/{id}", GetUser)` (the
-   annotated function is passed as the last argument) at the position of the function in
-   the file's top-level code, like a Python decorator. So `users` must be set above it.
+   annotated function is passed as the last argument) during the program's startup phase,
+   after the file's globals are set and before its `init`. So `users` must be a `global`.
+   **Done in the compiler (plan 4).**
 3. **JSON built-ins driven by types**: `to_json(value): str` for any value, and
    `from_json(text)`, which returns `T, error` where `T` comes from the variable it is
    stored in (like `channel(n)`). Both use the type descriptors that already exist.
@@ -97,8 +100,11 @@ if err != none ->
    task scheduler (plan 3) with epoll / kqueue, plus signals for graceful shutdown.
 6. **HTTP/1.1 parsing**: written in Meng inside meng-api on top of (5), or provided by
    the standard library (decision when milestone 4 starts).
-7. **`init` functions** (requested separately): a file may declare `fnc init() -> ... <-;`;
-   it runs before the program's top-level statements, dependencies first.
+7. **`init` functions and globals** (requested separately): a file may declare `fnc init() -> ... <-;`
+   and `global` variables; they run in the startup phase, dependencies first. Globals are
+   private to their file and frozen after startup (safe to read from every request task).
+   No task can be spawned during startup, so request workers start in `Serve`.
+   **Done in the compiler (plan 4).**
 
 ## Order of work
 
